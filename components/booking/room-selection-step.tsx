@@ -6,6 +6,19 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { ArrowLeft } from 'lucide-react'
 import Image from "next/image"
 import { BookingData } from "@/app/booking/page"
+import { fetchRooms } from "@/services/rooms"
+
+interface Room {
+  _id: string
+  roomNumber: string
+  type: string
+  status: "available" | "occupied" | "maintenance" | "cleaning"
+  floor: number
+  view: string
+  price: number
+  amenities: string[]
+  imageLink?: string
+}
 
 interface RoomSelectionStepProps {
   data: BookingData
@@ -16,38 +29,39 @@ interface RoomSelectionStepProps {
   setIsLoading: (loading: boolean) => void
 }
 
-const availableRooms = [
-  {
-    id: "1",
-    number: "101",
-    type: "Ocean View Suite",
-    price: 299,
-    image: "/placeholder.svg?height=200&width=300",
-    amenities: ["Ocean View", "King Bed", "Balcony", "Mini Bar", "Free Wi-Fi"],
-  },
-  {
-    id: "2",
-    number: "205",
-    type: "Deluxe Room",
-    price: 199,
-    image: "/placeholder.svg?height=200&width=300",
-    amenities: ["Garden View", "Queen Bed", "Work Desk", "Coffee Maker", "Free Wi-Fi"],
-  },
-  {
-    id: "3",
-    number: "301",
-    type: "Presidential Suite",
-    price: 599,
-    image: "/placeholder.svg?height=200&width=300",
-    amenities: ["Panoramic View", "2 Bedrooms", "Living Room", "Jacuzzi", "Butler Service"],
-  },
-]
-
 export default function RoomSelectionStep({ data, onUpdate, onNext, onPrev, setError, setIsLoading }: RoomSelectionStepProps) {
-  const [selectedRoomId, setSelectedRoomId] = useState<string>(data.selectedRoom?.id || "")
+  const [selectedRoomId, setSelectedRoomId] = useState<string>(data.selectedRoom?._id || "")
+  const [availableRooms, setAvailableRooms] = useState<Room[]>([])
+  const [filteredRooms, setFilteredRooms] = useState<Room[]>([])
 
-  const handleRoomSelect = async (room: typeof availableRooms[0]) => {
-    setSelectedRoomId(room.id)
+  useEffect(() => {
+    const loadRooms = async () => {
+      try {
+        const rooms = await fetchRooms()
+        console.log('Fetched Rooms:', rooms)
+        setAvailableRooms(rooms)
+        
+        // Filter rooms based on type if specified
+        if (data.roomType && data.roomType !== 'any') {
+          const filtered = rooms.filter(room => 
+            room.type.toLowerCase() === data.roomType?.toLowerCase()
+          )
+          console.log('Filtered Rooms:', filtered)
+          setFilteredRooms(filtered)
+        } else {
+          setFilteredRooms(rooms)
+        }
+      } catch (err) {
+        console.error('Error fetching rooms:', err)
+        setError('Failed to load rooms. Please try again.')
+      }
+    }
+
+    loadRooms()
+  }, [data.roomType, setError])
+
+  const handleRoomSelect = async (room: Room) => {
+    setSelectedRoomId(room._id)
     setIsLoading(true)
     setError("")
 
@@ -109,21 +123,21 @@ export default function RoomSelectionStep({ data, onUpdate, onNext, onPrev, setE
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-          {availableRooms.map((room) => (
+          {filteredRooms.map((room) => (
             <Card 
-              key={room.id} 
+              key={room._id} 
               className={`overflow-hidden shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 ${
-                selectedRoomId === room.id ? 'ring-2 ring-secondary' : ''
+                selectedRoomId === room._id ? 'ring-2 ring-secondary' : ''
               }`}
             >
               <div className="relative h-48">
                 <Image
-                  src={room.image || "/placeholder.svg"}
-                  alt={`${room.type} - Room ${room.number}`}
+                  src={room.imageLink || "/placeholder.svg"}
+                  alt={`${room.type} - Room ${room.roomNumber}`}
                   fill
                   className="object-cover"
                 />
-                {selectedRoomId === room.id && (
+                {selectedRoomId === room._id && (
                   <div className="absolute top-2 right-2 bg-secondary text-white px-2 py-1 rounded-full text-xs font-medium">
                     Selected
                   </div>
@@ -133,11 +147,11 @@ export default function RoomSelectionStep({ data, onUpdate, onNext, onPrev, setE
               <CardHeader>
                 <div className="flex justify-between items-start">
                   <div>
-                    <CardTitle className="text-xl font-medium text-primary">Room {room.number}</CardTitle>
+                    <CardTitle className="text-xl font-medium text-primary">Room {room.roomNumber}</CardTitle>
                     <CardDescription className="text-lg text-gray-600">{room.type}</CardDescription>
                   </div>
                   <div className="text-right">
-                    <p className="text-2xl font-medium text-primary">${room.price}</p>
+                    <p className="text-2xl font-medium text-primary">{room.price.toLocaleString()} FCFA</p>
                     <p className="text-sm text-gray-500">per night</p>
                   </div>
                 </div>
@@ -160,7 +174,7 @@ export default function RoomSelectionStep({ data, onUpdate, onNext, onPrev, setE
                   <div className="pt-2 border-t border-gray-200">
                     <div className="flex justify-between items-center text-sm">
                       <span className="text-gray-600">Total for {nights} night{nights > 1 ? 's' : ''}:</span>
-                      <span className="text-lg font-medium text-primary">${room.price * nights}</span>
+                      <span className="text-lg font-medium text-primary">{(room.price * nights).toLocaleString()} FCFA</span>
                     </div>
                   </div>
                 </div>
@@ -169,11 +183,11 @@ export default function RoomSelectionStep({ data, onUpdate, onNext, onPrev, setE
               <CardFooter>
                 <Button
                   onClick={() => handleRoomSelect(room)}
-                  disabled={selectedRoomId === room.id}
+                  disabled={selectedRoomId === room._id}
                   className="w-full bg-secondary hover:bg-secondary/90 text-white h-12 text-base font-medium transition-all duration-200 transform hover:scale-105 active:scale-95"
-                  aria-label={`Select ${room.type} room ${room.number}`}
+                  aria-label={`Select ${room.type} room ${room.roomNumber}`}
                 >
-                  {selectedRoomId === room.id ? 'Selected' : 'Select Room'}
+                  {selectedRoomId === room._id ? 'Selected' : 'Select Room'}
                 </Button>
               </CardFooter>
             </Card>

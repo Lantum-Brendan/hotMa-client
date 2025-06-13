@@ -1,359 +1,223 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "@/components/ui/dialog"
-import { Calendar, Clock, User, LogOut, Menu, CheckCircle, AlertCircle, CreditCard, Bed, Users, X } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import { DollarSign, Calendar, Clock, Hotel, User, RefreshCw, AlertCircle } from "lucide-react"
+import { fetchRooms, updateRoom } from "@/services/rooms"
+import { fetchBookings, checkInBooking, checkOutBooking } from "@/services/api/booking"
+import { formatCurrency } from "@/services/booking"
+import { BookingResponse } from "@/services/api/booking"
+import { fetchPendingPayments, processPayment } from "@/services/api/payment"
 
-interface CheckInOut {
-  id: string
-  bookingNumber: string
-  guestName: string
-  roomNumber: string
-  type: "check-in" | "check-out"
-  scheduledTime: string
-  status: "pending" | "completed" | "overdue"
-}
-
-interface RoomStatus {
-  id: string
+interface Room {
+  _id: string
   roomNumber: string
   type: string
   status: "available" | "occupied" | "maintenance" | "cleaning"
-  guestName?: string
-  checkOut?: string
+  floor: number
+  view: string
+  price: number
+  amenities: string[]
+  imageLink?: string
 }
 
-interface PendingPayment {
-  id: string
-  bookingNumber: string
-  guestName: string
-  amount: number
-  type: "balance" | "incidentals" | "deposit"
-  dueDate: string
-  isOverdue: boolean
+interface Payment {
+  _id: string;
+  guestName: string;
+  amountDue: number;
+  dueDate: string;
+  bookingNumber: string;
+  status: 'pending' | 'overdue' | 'paid';
 }
 
 export default function ReceptionistDashboard() {
-  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
-  const [alert, setAlert] = useState<{ type: "success" | "error"; message: string } | null>(null)
-  const [selectedAction, setSelectedAction] = useState<{
-    type: string
-    data: any
-  } | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
+  const [rooms, setRooms] = useState<Room[]>([])
+  const [bookings, setBookings] = useState<BookingResponse[]>([])
+  const [pendingPayments, setPendingPayments] = useState<Payment[]>([])
+  const [isLoadingRooms, setIsLoadingRooms] = useState(true)
+  const [isLoadingBookings, setIsLoadingBookings] = useState(true)
+  const [isLoadingPayments, setIsLoadingPayments] = useState(true)
+  const [errorRooms, setErrorRooms] = useState<string | null>(null)
+  const [errorBookings, setErrorBookings] = useState<string | null>(null)
+  const [errorPayments, setErrorPayments] = useState<string | null>(null)
 
-  // Mock data
-  const [checkInsOuts, setCheckInsOuts] = useState<CheckInOut[]>([
-    {
-      id: "1",
-      bookingNumber: "HM123456",
-      guestName: "John Smith",
-      roomNumber: "205",
-      type: "check-in",
-      scheduledTime: "15:00",
-      status: "pending",
-    },
-    {
-      id: "2",
-      bookingNumber: "HM789012",
-      guestName: "Sarah Johnson",
-      roomNumber: "301",
-      type: "check-out",
-      scheduledTime: "11:00",
-      status: "overdue",
-    },
-    {
-      id: "3",
-      bookingNumber: "HM345678",
-      guestName: "Mike Davis",
-      roomNumber: "102",
-      type: "check-in",
-      scheduledTime: "16:30",
-      status: "pending",
-    },
-  ])
+  useEffect(() => {
+    loadRooms()
+    loadBookings()
+    loadPendingPayments()
+  }, [])
 
-  const [roomStatuses, setRoomStatuses] = useState<RoomStatus[]>([
-    {
-      id: "1",
-      roomNumber: "101",
-      type: "Standard",
-      status: "available",
-    },
-    {
-      id: "2",
-      roomNumber: "102",
-      type: "Standard",
-      status: "cleaning",
-    },
-    {
-      id: "3",
-      roomNumber: "205",
-      type: "Ocean View Suite",
-      status: "occupied",
-      guestName: "John Smith",
-      checkOut: "2025-06-14",
-    },
-    {
-      id: "4",
-      roomNumber: "301",
-      type: "Presidential Suite",
-      status: "maintenance",
-    },
-  ])
-
-  const [pendingPayments, setPendingPayments] = useState<PendingPayment[]>([
-    {
-      id: "1",
-      bookingNumber: "HM123456",
-      guestName: "John Smith",
-      amount: 150,
-      type: "balance",
-      dueDate: "2025-06-10",
-      isOverdue: false,
-    },
-    {
-      id: "2",
-      bookingNumber: "HM789012",
-      guestName: "Sarah Johnson",
-      amount: 75,
-      type: "incidentals",
-      dueDate: "2025-06-09",
-      isOverdue: true,
-    },
-  ])
-
-  const showAlert = (message: string, type: "success" | "error") => {
-    setAlert({ message, type })
-    setTimeout(() => setAlert(null), 5000)
-  }
-
-  const handleCheckInOut = async (item: CheckInOut) => {
-    setSelectedAction({ type: item.type, data: item })
-  }
-
-  const confirmCheckInOut = async () => {
-    if (!selectedAction) return
-
-    setIsLoading(true)
+  const loadRooms = async () => {
+    setIsLoadingRooms(true)
+    setErrorRooms(null)
     try {
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 1500))
-
-      setCheckInsOuts((prev) =>
-        prev.map((item) => (item.id === selectedAction.data.id ? { ...item, status: "completed" as const } : item)),
-      )
-
-      showAlert(
-        `${selectedAction.type === "check-in" ? "Check-in" : "Check-out"} completed successfully for ${selectedAction.data.guestName}`,
-        "success",
-      )
-
-      setSelectedAction(null)
-    } catch (error) {
-      showAlert("Operation failed. Please try again.", "error")
+      const data = await fetchRooms()
+      setRooms(data)
+    } catch (err) {
+      console.error('Error fetching rooms:', err)
+      setErrorRooms(err instanceof Error ? err.message : 'Failed to fetch rooms')
     } finally {
-      setIsLoading(false)
+      setIsLoadingRooms(false)
     }
   }
 
-  const handleRoomUpdate = (room: RoomStatus) => {
-    setSelectedAction({ type: "room-update", data: room })
-  }
-
-  const handlePaymentProcess = async (payment: PendingPayment) => {
-    setIsLoading(true)
+  const loadBookings = async () => {
+    setIsLoadingBookings(true)
+    setErrorBookings(null)
     try {
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 1000))
-
-      setPendingPayments((prev) => prev.filter((p) => p.id !== payment.id))
-      showAlert(`Payment of $${payment.amount} processed successfully for ${payment.guestName}`, "success")
-    } catch (error) {
-      showAlert("Payment processing failed. Please try again.", "error")
+      const response = await fetchBookings()
+      setBookings(response.data)
+    } catch (err) {
+      console.error('Error fetching bookings:', err)
+      setErrorBookings(err instanceof Error ? err.message : 'Failed to fetch bookings')
     } finally {
-      setIsLoading(false)
+      setIsLoadingBookings(false)
     }
   }
 
-  const getStatusBadge = (status: string, isOverdue = false) => {
-    const baseClasses = "px-2 py-1 rounded-full text-xs font-medium"
-
-    if (isOverdue) {
-      return `${baseClasses} bg-red-100 text-red-800 border border-red-200`
+  const loadPendingPayments = async () => {
+    setIsLoadingPayments(true)
+    setErrorPayments(null)
+    try {
+      const response = await fetchPendingPayments();
+      setPendingPayments(response.data);
+    } catch (err) {
+      console.error('Error fetching payments:', err)
+      setErrorPayments(err instanceof Error ? err.message : 'Failed to fetch payments')
+    } finally {
+      setIsLoadingPayments(false)
     }
+  }
 
+  const getStatusBadge = (status: string) => {
     switch (status) {
-      case "pending":
-        return `${baseClasses} bg-yellow-100 text-yellow-800 border border-yellow-200`
-      case "completed":
-        return `${baseClasses} bg-green-100 text-green-800 border border-green-200`
       case "available":
-        return `${baseClasses} bg-green-100 text-green-800 border border-green-200`
+        return <Badge className="bg-green-500 text-white hover:bg-green-600">Available</Badge>
       case "occupied":
-        return `${baseClasses} bg-blue-100 text-blue-800 border border-blue-200`
-      case "cleaning":
-        return `${baseClasses} bg-yellow-100 text-yellow-800 border border-yellow-200`
+        return <Badge className="bg-blue-500 text-white hover:bg-blue-600">Occupied</Badge>
       case "maintenance":
-        return `${baseClasses} bg-red-100 text-red-800 border border-red-200`
+        return <Badge className="bg-red-500 text-white hover:bg-red-600">Maintenance</Badge>
+      case "cleaning":
+        return <Badge className="bg-yellow-500 text-white hover:bg-yellow-600">Cleaning</Badge>
       default:
-        return `${baseClasses} bg-gray-100 text-gray-800 border border-gray-200`
+        return <Badge>Unknown</Badge>
     }
   }
 
-  const getUrgentCount = () => {
-    const overdueCheckOuts = checkInsOuts.filter((item) => item.status === "overdue").length
-    const overduePayments = pendingPayments.filter((payment) => payment.isOverdue).length
-    return overdueCheckOuts + overduePayments
+  const handleCheckIn = async (bookingId: string) => {
+    console.log(`Attempting check-in for booking: ${bookingId}`)
+    setIsLoadingBookings(true)
+    setErrorBookings(null)
+    try {
+      const response = await checkInBooking(bookingId)
+      console.log('Check-in successful:', response)
+      loadBookings() // Refresh bookings after successful check-in
+    } catch (error) {
+      console.error('Error during check-in:', error)
+      setErrorBookings(error instanceof Error ? error.message : 'Failed to check-in booking')
+    } finally {
+      setIsLoadingBookings(false)
+    }
   }
 
-  const urgentCount = getUrgentCount()
+  const handleCheckOut = async (bookingId: string) => {
+    console.log(`Attempting check-out for booking: ${bookingId}`)
+    setIsLoadingBookings(true)
+    setErrorBookings(null)
+    try {
+      const response = await checkOutBooking(bookingId)
+      console.log('Check-out successful:', response)
+      loadBookings() // Refresh bookings after successful check-out
+    } catch (error) {
+      console.error('Error during check-out:', error)
+      setErrorBookings(error instanceof Error ? error.message : 'Failed to check-out booking')
+    } finally {
+      setIsLoadingBookings(false)
+    }
+  }
+
+  const handleUpdateRoomStatus = async (roomId: string, newStatus: Room["status"]) => {
+    setIsLoadingRooms(true)
+    try {
+      await updateRoom(roomId, { status: newStatus })
+      loadRooms() // Refresh rooms after update
+    } catch (error) {
+      console.error('Error updating room status:', error)
+      setErrorRooms(error instanceof Error ? error.message : 'Failed to update room status')
+    } finally {
+      setIsLoadingRooms(false)
+    }
+  }
+
+  const handleProcessPayment = async (paymentId: string) => {
+    console.log(`Processing payment: ${paymentId}`)
+    // TODO: Implement actual API call to process payment using a new function
+    setIsLoadingPayments(true);
+    try {
+      // This assumes your processPayment API takes the payment ID and perhaps some data, 
+      // and then returns the updated payment record. Adjust as per your backend API.
+      await processPayment(paymentId, {}); // Sending empty object as placeholder for payment details
+      loadPendingPayments(); // Refresh pending payments after processing
+    } catch (error) {
+      console.error('Error processing payment:', error);
+      setErrorPayments(error instanceof Error ? error.message : 'Failed to process payment');
+    } finally {
+      setIsLoadingPayments(false);
+    }
+  }
+
+  const today = new Date();
+  const todayISO = today.toISOString().slice(0, 10); // YYYY-MM-DD
+
+  const todaysCheckIns = bookings.filter(booking => {
+    const checkInDate = new Date(booking.booking.checkIn);
+    return checkInDate.toISOString().slice(0, 10) === todayISO;
+  });
+
+  const todaysCheckOuts = bookings.filter(booking => {
+    const checkOutDate = new Date(booking.booking.checkOut);
+    return checkOutDate.toISOString().slice(0, 10) === todayISO;
+  });
+
+  const handleBookNewRoom = () => {
+    // Redirect to the booking page, perhaps with a flag for receptionist booking
+    // The booking page (app/booking/page.tsx) will need to be updated to handle this scenario
+    window.location.href = "/booking?receptionist=true";
+  };
 
   return (
     <div className="min-h-screen bg-neutral font-roboto">
-      {/* Mobile Menu Button */}
-      <div className="lg:hidden fixed top-4 left-4 z-20">
-        <Button
-          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-          className="bg-white shadow-md border"
-          size="sm"
-          aria-label="Open navigation menu"
-        >
-          <Menu className="h-4 w-4" />
-        </Button>
-      </div>
-
-      <div className="flex">
-        {/* Sidebar */}
-        <div
-          className={`
-          bg-primary text-white w-64 min-h-screen fixed lg:relative z-10 transform transition-transform duration-300
-          ${isMobileMenuOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
-        `}
-        >
-          {/* User Profile */}
-          <div className="p-6 border-b border-white/20">
-            <div className="flex items-center space-x-3">
-              <div className="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center">
-                <User className="w-6 h-6" aria-hidden="true" />
-              </div>
-              <div>
-                <h2 className="font-medium text-lg">Jane Wilson</h2>
-                <p className="text-white/80 text-sm">Front Desk Receptionist</p>
-              </div>
-            </div>
-
-            {urgentCount > 0 && (
-              <div className="mt-4 flex items-center space-x-2 bg-red-500/20 border border-red-400/30 rounded-lg p-3">
-                <AlertCircle className="w-4 h-4 text-red-300" aria-hidden="true" />
-                <span className="text-sm text-red-100">
-                  <Badge className="bg-red-500 text-white mr-2">{urgentCount}</Badge>
-                  Urgent task{urgentCount > 1 ? "s" : ""} require attention
-                </span>
-              </div>
-            )}
-          </div>
-
-          {/* Quick Stats */}
-          <div className="p-6 border-b border-white/20">
-            <h3 className="text-sm font-medium text-white/80 mb-3">Today's Overview</h3>
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-white/70">Check-ins</span>
-                <span className="text-sm font-medium">
-                  {checkInsOuts.filter((item) => item.type === "check-in").length}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-white/70">Check-outs</span>
-                <span className="text-sm font-medium">
-                  {checkInsOuts.filter((item) => item.type === "check-out").length}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-white/70">Available Rooms</span>
-                <span className="text-sm font-medium">
-                  {roomStatuses.filter((room) => room.status === "available").length}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Logout */}
-          <div className="p-6">
-            <Button
-              onClick={() => showAlert("Logged out successfully", "success")}
-              variant="ghost"
-              className="w-full justify-start text-white/80 hover:bg-white/10 hover:text-white"
-              aria-label="Logout"
-            >
-              <LogOut className="w-5 h-5 mr-3" aria-hidden="true" />
-              Logout
-            </Button>
-          </div>
-        </div>
-
-        {/* Main Content */}
-        <div className="flex-1 p-4 lg:p-8 pt-16 lg:pt-8">
-          <div className="max-w-7xl mx-auto">
-            {/* Header */}
-            <div className="mb-8">
+      <div className="container mx-auto px-4 py-8 pt-20"> {/* Added pt-20 for Navbar clearance */}
               <h1 className="text-3xl font-medium text-primary mb-2">Receptionist Dashboard</h1>
-              <p className="text-gray-600">
-                {new Date().toLocaleDateString("en-US", {
-                  weekday: "long",
-                  year: "numeric",
-                  month: "long",
-                  day: "numeric",
-                })}
-              </p>
+        <p className="text-gray-600 mb-8">{today.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+
+        <div className="flex justify-end mb-4">
+          <Button onClick={handleBookNewRoom} className="bg-primary hover:bg-primary/90 text-white">
+            Book New Room
+          </Button>
             </div>
 
-            {/* Alert */}
-            {alert && (
-              <Alert
-                variant={alert.type === "error" ? "destructive" : "default"}
-                className={`mb-6 ${alert.type === "success" ? "border-green-200 bg-green-50 text-green-800" : ""}`}
-              >
-                {alert.type === "error" ? <AlertCircle className="h-4 w-4" /> : <CheckCircle className="h-4 w-4" />}
-                <AlertDescription>{alert.message}</AlertDescription>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="absolute right-2 top-2 h-6 w-6 p-0"
-                  onClick={() => setAlert(null)}
-                  aria-label="Dismiss alert"
-                >
-                  <X className="h-3 w-3" />
-                </Button>
-              </Alert>
-            )}
-
-            {/* Widgets Grid */}
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 mb-8">
-              {/* Today's Check-ins/Check-outs */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+          {/* Today's Check-ins & Check-outs */}
               <Card className="shadow-lg">
                 <CardHeader>
                   <CardTitle className="text-2xl font-medium text-primary flex items-center">
-                    <Calendar className="w-6 h-6 mr-2" aria-hidden="true" />
+                <Calendar className="w-6 h-6 mr-3" />
                     Today's Check-ins & Check-outs
                   </CardTitle>
                   <CardDescription>Manage guest arrivals and departures</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="overflow-x-auto">
+              {isLoadingBookings ? (
+                <div className="text-center py-10">Loading check-ins and check-outs...</div>
+              ) : errorBookings ? (
+                <div className="text-center py-10 text-red-500 flex items-center justify-center">
+                  <AlertCircle className="w-5 h-5 mr-2" /> Error: {errorBookings}
+                </div>
+              ) : (
                     <Table>
                       <TableHeader>
                         <TableRow>
@@ -362,41 +226,51 @@ export default function ReceptionistDashboard() {
                           <TableHead>Room</TableHead>
                           <TableHead>Time</TableHead>
                           <TableHead>Status</TableHead>
-                          <TableHead>Action</TableHead>
+                      <TableHead className="text-right">Action</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {checkInsOuts.map((item) => (
-                          <TableRow key={item.id}>
-                            <TableCell className="font-medium">{item.bookingNumber}</TableCell>
-                            <TableCell>{item.guestName}</TableCell>
-                            <TableCell>{item.roomNumber}</TableCell>
+                    {todaysCheckIns.length === 0 && todaysCheckOuts.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={6} className="text-center py-4 text-gray-500">No check-ins or check-outs for today.</TableCell>
+                      </TableRow>
+                    ) : (
+                      <>
+                        {todaysCheckIns.map(booking => (
+                          <TableRow key={booking.booking.bookingNumber}>
+                            <TableCell>{booking.booking.bookingNumber}</TableCell>
+                            <TableCell>{booking.booking.guestDetails.firstName} {booking.booking.guestDetails.lastName}</TableCell>
+                            <TableCell>{booking.booking.room.roomNumber}</TableCell>
                             <TableCell className="flex items-center">
-                              <Clock className="w-4 h-4 mr-1 text-gray-400" aria-hidden="true" />
-                              {item.scheduledTime}
+                              <Clock className="w-4 h-4 mr-1" />
+                              {new Date(booking.booking.checkIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                             </TableCell>
-                            <TableCell>
-                              <Badge className={getStatusBadge(item.status, item.status === "overdue")}>
-                                {item.status === "overdue" ? "Overdue" : item.status}
-                              </Badge>
-                            </TableCell>
-                            <TableCell>
-                              {item.status !== "completed" && (
-                                <Button
-                                  onClick={() => handleCheckInOut(item)}
-                                  size="sm"
-                                  className="bg-secondary hover:bg-secondary/90 text-white transition-all duration-200 transform hover:scale-105 active:scale-95"
-                                  aria-label={`${item.type === "check-in" ? "Check in" : "Check out"} ${item.guestName}`}
-                                >
-                                  {item.type === "check-in" ? "Check-in" : "Check-out"}
-                                </Button>
-                              )}
+                            <TableCell><Badge variant="outline" className="bg-yellow-100 text-yellow-800">Pending</Badge></TableCell>
+                            <TableCell className="text-right">
+                              <Button size="sm" onClick={() => handleCheckIn(booking.booking.bookingNumber)} className="bg-blue-500 hover:bg-blue-600 text-white">Check-in</Button>
                             </TableCell>
                           </TableRow>
                         ))}
+                        {todaysCheckOuts.map(booking => (
+                          <TableRow key={booking.booking.bookingNumber}>
+                            <TableCell>{booking.booking.bookingNumber}</TableCell>
+                            <TableCell>{booking.booking.guestDetails.firstName} {booking.booking.guestDetails.lastName}</TableCell>
+                            <TableCell>{booking.booking.room.roomNumber}</TableCell>
+                            <TableCell className="flex items-center">
+                              <Clock className="w-4 h-4 mr-1" />
+                              {new Date(booking.booking.checkOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </TableCell>
+                            <TableCell><Badge variant="outline" className="bg-red-100 text-red-800">Overdue</Badge></TableCell>
+                            <TableCell className="text-right">
+                              <Button size="sm" onClick={() => handleCheckOut(booking.booking.bookingNumber)} className="bg-blue-500 hover:bg-blue-600 text-white">Check-out</Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </>
+                    )}
                       </TableBody>
                     </Table>
-                  </div>
+              )}
                 </CardContent>
               </Card>
 
@@ -404,162 +278,110 @@ export default function ReceptionistDashboard() {
               <Card className="shadow-lg">
                 <CardHeader>
                   <CardTitle className="text-2xl font-medium text-primary flex items-center">
-                    <Bed className="w-6 h-6 mr-2" aria-hidden="true" />
+                <Hotel className="w-6 h-6 mr-3" />
                     Room Status
                   </CardTitle>
                   <CardDescription>Monitor and update room availability</CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    {roomStatuses.map((room) => (
-                      <Card key={room.id} className="border-2 hover:shadow-md transition-shadow">
-                        <CardContent className="p-4">
-                          <div className="flex items-center justify-between mb-3">
-                            <div>
-                              <h4 className="font-medium text-primary">Room {room.roomNumber}</h4>
-                              <p className="text-sm text-gray-600">{room.type}</p>
+              {isLoadingRooms ? (
+                <div className="text-center py-10">Loading room statuses...</div>
+              ) : errorRooms ? (
+                <div className="text-center py-10 text-red-500 flex items-center justify-center">
+                  <AlertCircle className="w-5 h-5 mr-2" /> Error: {errorRooms}
                             </div>
-                            <Badge className={getStatusBadge(room.status)}>
-                              {room.status.charAt(0).toUpperCase() + room.status.slice(1)}
-                            </Badge>
-                          </div>
-
-                          {room.guestName && (
-                            <div className="mb-3 text-sm text-gray-600">
-                              <div className="flex items-center">
-                                <Users className="w-3 h-3 mr-1" aria-hidden="true" />
-                                {room.guestName}
-                              </div>
-                              {room.checkOut && (
-                                <div className="flex items-center mt-1">
-                                  <Calendar className="w-3 h-3 mr-1" aria-hidden="true" />
-                                  Check-out: {new Date(room.checkOut).toLocaleDateString()}
-                                </div>
-                              )}
-                            </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-4">
+                  {rooms.length === 0 ? (
+                    <div className="col-span-2 text-center py-4 text-gray-500">No rooms found.</div>
+                  ) : (
+                    rooms.map(room => {
+                      // Find the booking that corresponds to the current room and is currently occupied
+                      const occupiedBooking = bookings.find(
+                        b => b.booking.room.roomNumber === room.roomNumber &&
+                          (b.status === "confirmed" || b.status === "pending") && // Considering confirmed/pending bookings as occupied
+                          new Date(b.booking.checkIn) <= today && new Date(b.booking.checkOut) >= today // Occupied today
+                      );
+                      return (
+                        <Card key={room._id} className="border p-4">
+                          <h3 className="font-medium text-lg text-primary">Room {room.roomNumber}</h3>
+                          <p className="text-sm text-gray-600 mb-2">{room.type}</p>
+                          <div className="mb-3">{getStatusBadge(room.status)}</div>
+                          {room.status === 'occupied' && occupiedBooking && (
+                            <p className="text-sm text-gray-500 flex items-center">
+                              <User className="w-3 h-3 mr-1" /> {occupiedBooking.guestDetails.firstName} {occupiedBooking.guestDetails.lastName}
+                            </p>
                           )}
-
+                          {room.status === 'occupied' && occupiedBooking && (
+                            <p className="text-sm text-gray-500 flex items-center">
+                              <Calendar className="w-3 h-3 mr-1" /> Check-out: {new Date(occupiedBooking.booking.checkOut).toLocaleDateString()}
+                            </p>
+                          )}
                           <Button
-                            onClick={() => handleRoomUpdate(room)}
                             size="sm"
                             variant="outline"
-                            className="w-full border-primary text-primary hover:bg-primary hover:text-white transition-all duration-200"
-                            aria-label={`Update status for room ${room.roomNumber}`}
+                            className="mt-3 border-primary text-primary hover:bg-primary hover:text-white"
+                            onClick={() => handleUpdateRoomStatus(room.roomNumber, room.status === 'available' ? 'occupied' : 'available')}
                           >
                             Update Status
                           </Button>
-                        </CardContent>
                       </Card>
-                    ))}
+                      )
+                    })
+                  )}
                   </div>
+              )}
                 </CardContent>
               </Card>
             </div>
 
             {/* Pending Payments */}
-            <Card className="shadow-lg">
+        <Card className="shadow-lg mb-8">
               <CardHeader>
                 <CardTitle className="text-2xl font-medium text-primary flex items-center">
-                  <CreditCard className="w-6 h-6 mr-2" aria-hidden="true" />
+              <DollarSign className="w-6 h-6 mr-3" />
                   Pending Payments
-                  {pendingPayments.filter((p) => p.isOverdue).length > 0 && (
-                    <Badge className="ml-2 bg-red-500 text-white">
-                      {pendingPayments.filter((p) => p.isOverdue).length} Overdue
-                    </Badge>
-                  )}
                 </CardTitle>
                 <CardDescription>Process outstanding guest payments</CardDescription>
               </CardHeader>
               <CardContent>
+            {isLoadingPayments ? (
+              <div className="text-center py-10">Loading pending payments...</div>
+            ) : errorPayments ? (
+              <div className="text-center py-10 text-red-500 flex items-center justify-center">
+                <AlertCircle className="w-5 h-5 mr-2" /> Error: {errorPayments}
+              </div>
+            ) : pendingPayments.length === 0 ? (
+              <div className="text-center py-4 text-gray-500">No pending payments.</div>
+            ) : (
                 <div className="space-y-4">
-                  {pendingPayments.map((payment) => (
-                    <div
-                      key={payment.id}
-                      className={`flex items-center justify-between p-4 rounded-lg border-2 ${
-                        payment.isOverdue ? "border-red-200 bg-red-50" : "border-gray-200 bg-white"
-                      }`}
-                    >
-                      <div className="flex-1">
-                        <div className="flex items-center space-x-4">
+                {pendingPayments.map(payment => (
+                  <div key={payment._id} className={`p-4 rounded-lg flex justify-between items-center ${payment.status === 'overdue' ? 'bg-red-50 border border-red-200' : 'bg-gray-50 border border-gray-200'}`}>
                           <div>
-                            <h4 className="font-medium text-gray-900">{payment.guestName}</h4>
+                      <p className="font-medium text-gray-800">{payment.guestName}</p>
                             <p className="text-sm text-gray-600">Booking #{payment.bookingNumber}</p>
                           </div>
-                          <div>
-                            <p className="text-lg font-medium text-primary">${payment.amount}</p>
-                            <p className="text-sm text-gray-600 capitalize">{payment.type}</p>
-                          </div>
-                          <div>
-                            <p className="text-sm text-gray-600">
-                              Due: {new Date(payment.dueDate).toLocaleDateString()}
-                            </p>
-                            {payment.isOverdue && (
-                              <Badge className="bg-red-100 text-red-800 border border-red-200">Overdue</Badge>
-                            )}
-                          </div>
+                    <div className="text-right">
+                      <p className="font-medium text-gray-800">{formatCurrency(payment.amountDue)}</p>
+                      <div className={`text-sm ${payment.status === 'overdue' ? 'text-red-600' : 'text-gray-500'}`}>
+                        <span>Due: {new Date(payment.dueDate).toLocaleDateString()}</span>
+                        {payment.status === 'overdue' && <Badge className="ml-2 bg-red-500 text-white">Overdue</Badge>}
                         </div>
                       </div>
                       <Button
-                        onClick={() => handlePaymentProcess(payment)}
-                        disabled={isLoading}
-                        className="bg-secondary hover:bg-secondary/90 text-white transition-all duration-200 transform hover:scale-105 active:scale-95"
-                        aria-label={`Process payment of $${payment.amount} for ${payment.guestName}`}
+                      size="sm"
+                      onClick={() => handleProcessPayment(payment._id)}
+                      className="bg-secondary hover:bg-secondary/90 text-white"
                       >
                         Process Payment
                       </Button>
                     </div>
                   ))}
-
-                  {pendingPayments.length === 0 && (
-                    <div className="text-center py-8 text-gray-500">
-                      <CreditCard className="w-12 h-12 mx-auto mb-4 text-gray-300" aria-hidden="true" />
-                      <p>No pending payments</p>
                     </div>
                   )}
-                </div>
               </CardContent>
             </Card>
           </div>
-        </div>
-      </div>
-
-      {/* Mobile Overlay */}
-      {isMobileMenuOpen && (
-        <div className="fixed inset-0 bg-black/50 z-5 lg:hidden" onClick={() => setIsMobileMenuOpen(false)} />
-      )}
-
-      {/* Confirmation Dialog */}
-      <Dialog open={!!selectedAction} onOpenChange={() => setSelectedAction(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="text-xl font-medium text-primary">
-              {selectedAction?.type === "check-in"
-                ? "Confirm Check-in"
-                : selectedAction?.type === "check-out"
-                  ? "Confirm Check-out"
-                  : "Update Room Status"}
-            </DialogTitle>
-            <DialogDescription>
-              {selectedAction?.type === "check-in" || selectedAction?.type === "check-out"
-                ? `Are you sure you want to ${selectedAction.type.replace("-", " ")} ${selectedAction.data?.guestName}?`
-                : `Update the status for Room ${selectedAction?.data?.roomNumber}`}
-            </DialogDescription>
-          </DialogHeader>
-
-          <DialogFooter className="sm:justify-between">
-            <Button variant="outline" onClick={() => setSelectedAction(null)} className="border-gray-300 text-gray-700">
-              Cancel
-            </Button>
-            <Button
-              onClick={confirmCheckInOut}
-              disabled={isLoading}
-              className="bg-secondary hover:bg-secondary/90 text-white"
-            >
-              {isLoading ? "Processing..." : "Confirm"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }

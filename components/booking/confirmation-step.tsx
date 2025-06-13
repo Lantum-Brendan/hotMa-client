@@ -4,33 +4,83 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { CheckCircle, Download, Calendar, MapPin, Users, Phone, Mail } from 'lucide-react'
 import { BookingData } from "@/app/booking/page"
+import { calculateBookingTotal, formatCurrency } from "@/services/booking"
+import { useToast } from "@/components/ui/use-toast"
+import { useEffect } from "react"
 
 interface ConfirmationStepProps {
   data: BookingData
   onUpdate: (data: Partial<BookingData>) => void
+  onPrev: () => void
+  setError: (error: string) => void
+  setIsLoading: (loading: boolean) => void
 }
 
 export default function ConfirmationStep({ data }: ConfirmationStepProps) {
-  const calculateNights = () => {
-    if (data.checkIn && data.checkOut) {
-      const checkIn = new Date(data.checkIn)
-      const checkOut = new Date(data.checkOut)
-      return Math.ceil((checkOut.getTime() - checkIn.getTime()) / (1000 * 60 * 60 * 24))
-    }
-    return 1
-  }
+  const { toast } = useToast()
 
-  const calculateTotal = () => {
-    if (!data.selectedRoom) return 0
-    const nights = calculateNights()
-    const subtotal = data.selectedRoom.price * nights
-    const tax = Math.round(subtotal * 0.15)
-    return subtotal + tax
-  }
+  useEffect(() => {
+    if (data.bookingNumber) {
+      toast({
+        title: "Booking Confirmed!",
+        description: `Your booking #${data.bookingNumber} is confirmed.`, 
+        variant: "success",
+      })
+    }
+  }, [data.bookingNumber, toast])
+
+  const bookingCalculation = data.selectedRoom && data.checkIn && data.checkOut
+    ? calculateBookingTotal(data.selectedRoom, data.checkIn, data.checkOut)
+    : null
 
   const handleDownloadPDF = () => {
-    // Simulate PDF download
-    console.log("Downloading booking confirmation PDF...")
+    if (!data.bookingNumber || !data.selectedRoom || !data.guestDetails || !bookingCalculation) {
+      console.error("Missing booking data for PDF download.")
+      toast({
+        title: "Download Failed",
+        description: "Booking details are incomplete. Cannot generate PDF.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    const confirmationContent = `
+      HotMa Hotel Booking Confirmation\n\n
+      Booking Number: ${data.bookingNumber}\n
+      Cancellation Code: ${data.cancellationCode}\n\n
+      --- Reservation Details ---\n
+      Room: ${data.selectedRoom.type} (Room No. ${data.selectedRoom.roomNumber})\n
+      Check-in: ${new Date(data.checkIn).toLocaleDateString()}\n
+      Check-out: ${new Date(data.checkOut).toLocaleDateString()}\n
+      Nights: ${bookingCalculation.nights}\n\n
+      --- Guest Details ---\n
+      Name: ${data.guestDetails.firstName} ${data.guestDetails.lastName}\n
+      Email: ${data.guestDetails.email}\n
+      Phone: ${data.guestDetails.phone}\n
+      Special Requests: ${data.guestDetails.specialRequests || 'N/A'}\n\n
+      --- Payment Summary ---\n
+      Room Rate: ${formatCurrency(bookingCalculation.subtotal)}\n
+      Taxes & Fees: ${formatCurrency(bookingCalculation.tax)}\n
+      Total Paid: ${formatCurrency(bookingCalculation.total)}\n
+      Payment Method: MTN Mobile Money\n\n
+      Thank you for your booking!\n
+    `
+
+    const blob = new Blob([confirmationContent], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `HotMa_Booking_${data.bookingNumber}.txt`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+
+    toast({
+      title: "Download Complete",
+      description: "Your booking confirmation has been downloaded.",
+      variant: "success",
+    })
   }
 
   return (
@@ -68,7 +118,7 @@ export default function ConfirmationStep({ data }: ConfirmationStepProps) {
             <div className="flex items-center space-x-3">
               <MapPin className="w-5 h-5 text-secondary" aria-hidden="true" />
               <div>
-                <p className="font-medium">Room {data.selectedRoom?.number}</p>
+                <p className="font-medium">Room {data.selectedRoom?.roomNumber}</p>
                 <p className="text-gray-600">{data.selectedRoom?.type}</p>
               </div>
             </div>
@@ -79,7 +129,7 @@ export default function ConfirmationStep({ data }: ConfirmationStepProps) {
                 <p className="font-medium">
                   {new Date(data.checkIn).toLocaleDateString()} - {new Date(data.checkOut).toLocaleDateString()}
                 </p>
-                <p className="text-gray-600">{calculateNights()} night{calculateNights() > 1 ? 's' : ''}</p>
+                <p className="text-gray-600">{bookingCalculation?.nights} night{bookingCalculation?.nights !== 1 ? 's' : ''}</p>
               </div>
             </div>
 
@@ -139,23 +189,23 @@ export default function ConfirmationStep({ data }: ConfirmationStepProps) {
               <h4 className="font-medium text-gray-700 mb-3">Payment Summary</h4>
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-gray-600">Room Rate ({calculateNights()} night{calculateNights() > 1 ? 's' : ''})</span>
-                  <span>${data.selectedRoom?.price && data.selectedRoom.price * calculateNights()}</span>
+                  <span className="text-gray-600">Room Rate ({bookingCalculation?.nights} night{bookingCalculation?.nights !== 1 ? 's' : ''})</span>
+                  <span>{formatCurrency(bookingCalculation?.subtotal || 0)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600">Taxes & Fees</span>
-                  <span>${data.selectedRoom?.price && Math.round(data.selectedRoom.price * calculateNights() * 0.15)}</span>
+                  <span>{formatCurrency(bookingCalculation?.tax || 0)}</span>
                 </div>
                 <div className="flex justify-between font-medium text-primary pt-2 border-t">
                   <span>Total Paid</span>
-                  <span>${calculateTotal()}</span>
+                  <span>{formatCurrency(bookingCalculation?.total || 0)}</span>
                 </div>
               </div>
             </div>
 
             <div className="pt-4 border-t">
               <p className="text-sm text-gray-600">
-                Payment Method: {data.paymentMethod === 'momo' ? 'MTN Mobile Money' : 'Credit/Debit Card'}
+                Payment Method: MTN Mobile Money
               </p>
             </div>
           </CardContent>
@@ -219,8 +269,8 @@ export default function ConfirmationStep({ data }: ConfirmationStepProps) {
             <div>
               <h4 className="font-medium text-gray-700 mb-2">Contact</h4>
               <ul className="space-y-1">
-                <li>• Phone: +1 (234) 567-8900</li>
-                <li>• Email: reservations@hotmahotel.com</li>
+                <li>• Phone: +237 677 88 99 66</li>
+                <li>• Email: info@hotmahotel.com</li>
                 <li>• 24/7 guest services available</li>
               </ul>
             </div>

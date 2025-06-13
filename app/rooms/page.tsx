@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -33,9 +33,12 @@ import {
   X,
   Settings,
 } from "lucide-react"
+import { fetchRooms } from '../../services/rooms'
+import Link from 'next/link';
+import { getUserRole } from '../../services/auth';
 
 interface Room {
-  id: string
+  _id: string;
   roomNumber: string
   type: string
   status: "available" | "occupied" | "maintenance" | "cleaning" | "out-of-order"
@@ -44,6 +47,7 @@ interface Room {
   price: number
   amenities: string[]
   lastUpdated: string
+  imageLink?: string;
 }
 
 interface RoomFilters {
@@ -71,7 +75,7 @@ const AMENITIES = [
 ]
 
 export default function RoomManagementPage() {
-  const [isAdmin] = useState(true) // Mock admin status
+  const [isAdmin, setIsAdmin] = useState(false);
   const [searchTerm, setSearchTerm] = useState("")
   const [showFilters, setShowFilters] = useState(false)
   const [showAddForm, setShowAddForm] = useState(false)
@@ -79,7 +83,9 @@ export default function RoomManagementPage() {
   const [currentPage, setCurrentPage] = useState(1)
   const [itemsPerPage] = useState(10)
   const [alert, setAlert] = useState<{ type: "success" | "error"; message: string } | null>(null)
-  const [isLoading, setIsLoading] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const [rooms, setRooms] = useState<Room[]>([])
+  const [error, setError] = useState<string | null>(null)
 
   const [filters, setFilters] = useState<RoomFilters>({
     type: "all",
@@ -96,66 +102,36 @@ export default function RoomManagementPage() {
     view: "",
     price: "",
     amenities: [] as string[],
+    imageLink: "",
   })
 
-  // Mock room data
-  const [rooms, setRooms] = useState<Room[]>([
-    {
-      id: "1",
-      roomNumber: "101",
-      type: "Standard",
-      status: "available",
-      floor: 1,
-      view: "Garden View",
-      price: 150,
-      amenities: ["Wi-Fi", "Coffee Maker"],
-      lastUpdated: "2025-06-09T10:30:00Z",
-    },
-    {
-      id: "2",
-      roomNumber: "102",
-      type: "Standard",
-      status: "cleaning",
-      floor: 1,
-      view: "Garden View",
-      price: 150,
-      amenities: ["Wi-Fi", "Coffee Maker"],
-      lastUpdated: "2025-06-09T11:15:00Z",
-    },
-    {
-      id: "3",
-      roomNumber: "205",
-      type: "Ocean View Suite",
-      status: "occupied",
-      floor: 2,
-      view: "Ocean View",
-      price: 299,
-      amenities: ["Wi-Fi", "Mini Bar", "Balcony", "King Bed"],
-      lastUpdated: "2025-06-09T09:45:00Z",
-    },
-    {
-      id: "4",
-      roomNumber: "301",
-      type: "Presidential Suite",
-      status: "available",
-      floor: 3,
-      view: "Ocean View",
-      price: 599,
-      amenities: ["Wi-Fi", "Mini Bar", "Balcony", "Jacuzzi", "Butler Service", "Living Room"],
-      lastUpdated: "2025-06-09T08:20:00Z",
-    },
-    {
-      id: "5",
-      roomNumber: "203",
-      type: "Deluxe",
-      status: "maintenance",
-      floor: 2,
-      view: "City View",
-      price: 199,
-      amenities: ["Wi-Fi", "Work Desk", "Queen Bed"],
-      lastUpdated: "2025-06-09T12:00:00Z",
-    },
-  ])
+  const [showEditForm, setShowEditForm] = useState(false);
+  const [editingRoom, setEditingRoom] = useState<Room | null>(null);
+  const [editedRoomData, setEditedRoomData] = useState<Partial<Room>>({});
+
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [roomToDelete, setRoomToDelete] = useState<Room | null>(null);
+
+  useEffect(() => {
+    const role = getUserRole();
+    if (role === 'admin') {
+      setIsAdmin(true);
+    } else {
+      setIsAdmin(false);
+    }
+    const loadRooms = async () => {
+      try {
+        const data = await fetchRooms()
+        setRooms(data)
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : 'An unknown error occurred');
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    loadRooms()
+  }, [])
 
   const showAlert = (message: string, type: "success" | "error") => {
     setAlert({ message, type })
@@ -216,7 +192,7 @@ export default function RoomManagementPage() {
 
       setRooms((prev) =>
         prev.map((r) =>
-          r.id === room.id ? { ...r, status: newStatus as Room["status"], lastUpdated: new Date().toISOString() } : r,
+          r._id === room._id ? { ...r, status: newStatus as Room["status"], lastUpdated: new Date().toISOString() } : r,
         ),
       )
 
@@ -260,7 +236,7 @@ export default function RoomManagementPage() {
       await new Promise((resolve) => setTimeout(resolve, 1500))
 
       const room: Room = {
-        id: Date.now().toString(),
+        _id: Date.now().toString(),
         roomNumber: newRoom.roomNumber,
         type: newRoom.type,
         status: "available",
@@ -279,6 +255,7 @@ export default function RoomManagementPage() {
         view: "",
         price: "",
         amenities: [],
+        imageLink: "",
       })
       setShowAddForm(false)
       showAlert(`Room ${room.roomNumber} added successfully`, "success")
@@ -289,116 +266,111 @@ export default function RoomManagementPage() {
     }
   }
 
-  const handleAmenityToggle = (amenity: string) => {
-    setNewRoom((prev) => ({
-      ...prev,
-      amenities: prev.amenities.includes(amenity)
-        ? prev.amenities.filter((a) => a !== amenity)
-        : [...prev.amenities, amenity],
-    }))
-  }
+  const handleEditClick = (room: Room) => {
+    setEditingRoom(room);
+    setEditedRoomData({ ...room }); // Pre-fill with current room data
+    setShowEditForm(true);
+  };
+
+  const handleDeleteClick = (room: Room) => {
+    setRoomToDelete(room);
+    setShowDeleteConfirm(true);
+  };
+
+  const handleEditChange = (key: keyof Room, value: any) => {
+    setEditedRoomData((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleUpdateRoom = async () => {
+    if (!editingRoom) return;
+    setIsLoading(true);
+    try {
+      const response = await default_api.updateRoom(editingRoom._id, editedRoomData);
+      showAlert(`Room ${editingRoom.roomNumber} updated successfully!`, "success");
+      setShowEditForm(false);
+      setEditingRoom(null);
+      setEditedRoomData({});
+      // Refresh rooms after update
+      const updatedRooms = await default_api.fetchRooms();
+      setRooms(updatedRooms);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to update room');
+      showAlert('Failed to update room. Please try again.', 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!roomToDelete) return;
+    setIsLoading(true);
+    try {
+      await default_api.deleteRoom(roomToDelete._id);
+      showAlert(`Room ${roomToDelete.roomNumber} deleted successfully!`, "success");
+      setShowDeleteConfirm(false);
+      setRoomToDelete(null);
+      // Refresh rooms after delete
+      const updatedRooms = await default_api.fetchRooms();
+      setRooms(updatedRooms);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to delete room');
+      showAlert('Failed to delete room. Please try again.', 'error');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const getStatusBadge = (status: string) => {
-    const baseClasses = "px-2 py-1 rounded-full text-xs font-medium"
-
     switch (status) {
       case "available":
-        return `${baseClasses} bg-green-100 text-green-800 border border-green-200`
+        return <Badge variant="secondary">Available</Badge>
       case "occupied":
-        return `${baseClasses} bg-blue-100 text-blue-800 border border-blue-200`
-      case "cleaning":
-        return `${baseClasses} bg-yellow-100 text-yellow-800 border border-yellow-200`
+        return <Badge variant="destructive">Occupied</Badge>
       case "maintenance":
-        return `${baseClasses} bg-orange-100 text-orange-800 border border-orange-200`
+        return <Badge className="bg-yellow-500 text-white hover:bg-yellow-600">Maintenance</Badge>
+      case "cleaning":
+        return <Badge className="bg-blue-500 text-white hover:bg-blue-600">Cleaning</Badge>
       case "out-of-order":
-        return `${baseClasses} bg-red-100 text-red-800 border border-red-200`
+        return <Badge className="bg-gray-500 text-white hover:bg-gray-600">Out of Order</Badge>
       default:
-        return `${baseClasses} bg-gray-100 text-gray-800 border border-gray-200`
+        return <Badge>Unknown</Badge>
     }
   }
 
   return (
-    <div className="min-h-screen bg-neutral font-roboto">
-      <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-medium text-primary mb-2">Room Management</h1>
-          <p className="text-gray-600">Manage hotel rooms, availability, and pricing</p>
-        </div>
-
-        {/* Alert */}
-        {alert && (
-          <Alert
-            variant={alert.type === "error" ? "destructive" : "default"}
-            className={`mb-6 ${alert.type === "success" ? "border-green-200 bg-green-50 text-green-800" : ""}`}
-          >
-            {alert.type === "error" ? <AlertCircle className="h-4 w-4" /> : <CheckCircle className="h-4 w-4" />}
-            <AlertDescription>{alert.message}</AlertDescription>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="absolute right-2 top-2 h-6 w-6 p-0"
-              onClick={() => setAlert(null)}
-              aria-label="Dismiss alert"
-            >
-              <X className="h-3 w-3" />
-            </Button>
-          </Alert>
-        )}
-
-        {/* Controls */}
-        <Card className="mb-6 shadow-lg">
-          <CardContent className="p-6">
-            <div className="flex flex-col lg:flex-row gap-4 items-center justify-between">
-              {/* Search */}
-              <div className="relative flex-1 max-w-md">
-                <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" aria-hidden="true" />
+    <div className="flex min-h-screen w-full flex-col bg-muted/40">
+      <div className="flex flex-col sm:gap-4 sm:py-4 sm:pl-14">
+        <header className="sticky top-0 z-30 flex h-14 items-center gap-4 border-b bg-background px-4 sm:static sm:h-auto sm:border-0 sm:bg-transparent sm:px-6">
+          <h1 className="text-2xl font-semibold">Rooms</h1>
+          <div className="relative ml-auto flex-1 md:grow-0">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Search rooms by number, type, or view..."
+              type="search"
+              placeholder="Search rooms..."
+              className="w-full rounded-lg bg-background pl-8 md:w-[200px] lg:w-[336px]"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10 h-12 border-gray-300 focus:border-primary focus:ring-primary"
-                  aria-label="Search rooms"
                 />
               </div>
-
-              {/* Action Buttons */}
-              <div className="flex gap-3">
-                <Button
-                  onClick={() => setShowFilters(!showFilters)}
-                  variant="outline"
-                  className="border-primary text-primary hover:bg-primary hover:text-white h-12"
-                  aria-label="Toggle filters"
-                >
-                  <Filter className="w-4 h-4 mr-2" aria-hidden="true" />
-                  Filters
-                  {Object.values(filters).some((f) => f !== "all") && (
-                    <Badge className="ml-2 bg-secondary text-white">Active</Badge>
-                  )}
+          <Button variant="outline" size="sm" onClick={() => setShowFilters(!showFilters)}>
+            <Filter className="h-4 w-4 mr-2" /> Filters
                 </Button>
+          {isAdmin && (
+            <Button size="sm" onClick={() => setShowAddForm(true)}>
+              <Plus className="h-4 w-4 mr-2" /> Add Room
+            </Button>
+          )}
+        </header>
 
-                {isAdmin && (
-                  <Button
-                    onClick={() => setShowAddForm(true)}
-                    className="bg-primary hover:bg-primary/90 text-white h-12 transition-all duration-200 transform hover:scale-105 active:scale-95"
-                    aria-label="Add new room"
-                  >
-                    <Plus className="w-4 h-4 mr-2" aria-hidden="true" />
-                    Add Room
-                  </Button>
-                )}
-              </div>
-            </div>
-
-            {/* Filters */}
             {showFilters && (
-              <div className="mt-6 pt-6 border-t border-gray-200">
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="filter-type">Room Type</Label>
+          <Card className="p-4 mb-4">
+            <h4 className="font-semibold mb-2">Filter Rooms</h4>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <Label htmlFor="filterType">Room Type</Label>
                     <Select value={filters.type} onValueChange={(value) => handleFilterChange("type", value)}>
-                      <SelectTrigger id="filter-type" className="h-10">
-                        <SelectValue placeholder="All Types" />
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select Type" />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">All Types</SelectItem>
@@ -410,254 +382,125 @@ export default function RoomManagementPage() {
                       </SelectContent>
                     </Select>
                   </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="filter-status">Status</Label>
+              <div>
+                <Label htmlFor="filterStatus">Status</Label>
                     <Select value={filters.status} onValueChange={(value) => handleFilterChange("status", value)}>
-                      <SelectTrigger id="filter-status" className="h-10">
-                        <SelectValue placeholder="All Statuses" />
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select Status" />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">All Statuses</SelectItem>
                         {ROOM_STATUSES.map((status) => (
                           <SelectItem key={status} value={status}>
-                            {status.charAt(0).toUpperCase() + status.slice(1)}
+                        {status}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="filter-floor">Floor</Label>
-                    <Select value={filters.floor} onValueChange={(value) => handleFilterChange("floor", value)}>
-                      <SelectTrigger id="filter-floor" className="h-10">
-                        <SelectValue placeholder="All Floors" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Floors</SelectItem>
-                        <SelectItem value="1">Floor 1</SelectItem>
-                        <SelectItem value="2">Floor 2</SelectItem>
-                        <SelectItem value="3">Floor 3</SelectItem>
-                        <SelectItem value="4">Floor 4</SelectItem>
-                      </SelectContent>
-                    </Select>
+              <div>
+                <Label htmlFor="filterFloor">Floor</Label>
+                <Input type="text" value={filters.floor} onChange={(e) => handleFilterChange("floor", e.target.value)} placeholder="Filter by floor" />
                   </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="filter-min-price">Min Price</Label>
-                    <Input
-                      id="filter-min-price"
-                      type="number"
-                      placeholder="$0"
-                      value={filters.minPrice}
-                      onChange={(e) => handleFilterChange("minPrice", e.target.value)}
-                      className="h-10"
-                    />
+              <div>
+                <Label htmlFor="minPrice">Min Price</Label>
+                <Input type="number" value={filters.minPrice} onChange={(e) => handleFilterChange("minPrice", e.target.value)} placeholder="Min price" />
                   </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="filter-max-price">Max Price</Label>
-                    <Input
-                      id="filter-max-price"
-                      type="number"
-                      placeholder="$999"
-                      value={filters.maxPrice}
-                      onChange={(e) => handleFilterChange("maxPrice", e.target.value)}
-                      className="h-10"
-                    />
+              <div>
+                <Label htmlFor="maxPrice">Max Price</Label>
+                <Input type="number" value={filters.maxPrice} onChange={(e) => handleFilterChange("maxPrice", e.target.value)} placeholder="Max price" />
                   </div>
                 </div>
-
-                <div className="mt-4 flex justify-end">
-                  <Button
-                    onClick={clearFilters}
-                    variant="outline"
-                    size="sm"
-                    className="border-gray-300 text-gray-700 hover:bg-gray-50"
-                  >
+            <Button variant="outline" className="mt-4" onClick={clearFilters}>
                     Clear Filters
                   </Button>
+          </Card>
+        )}
+
+        {alert && (
+          <Alert variant={alert.type === "success" ? "default" : "destructive"}>
+            {alert.type === "success" ? <CheckCircle className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+            <AlertDescription>{alert.message}</AlertDescription>
+          </Alert>
+        )}
+
+        {isLoading ? (
+          <div className="text-center py-10">Loading rooms...</div>
+        ) : error ? (
+          <div className="text-center py-10 text-red-500">Error: {error}</div>
+        ) : (
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 p-4">
+            {paginatedRooms.map((room) => (
+              <Card key={room._id} className="flex flex-col">
+                {room.imageLink && (
+                  <img src={room.imageLink} alt={`Room ${room.roomNumber}`} className="w-full h-48 object-cover rounded-t-lg" />
+                )}
+                <CardContent className="p-4 flex-grow flex flex-col justify-between">
+                  <div>
+                    <div className="flex justify-between items-center mb-2">
+                      <h3 className="text-xl font-bold">Room {room.roomNumber}</h3>
+                      <p className="text-lg font-semibold text-primary">{room.price} CFA <span className="text-sm font-normal text-muted-foreground">per night</span></p>
                 </div>
+                    <p className="text-sm text-muted-foreground mb-4">{room.type}</p>
+                    <p className="text-sm mb-2"><strong>Amenities:</strong> {room.amenities.slice(0, 3).join(', ')}{room.amenities.length > 3 ? '...' : ''}</p>
               </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Results Summary */}
-        <div className="mb-4 flex items-center justify-between">
-          <p className="text-sm text-gray-600">
-            Showing {startIndex + 1}-{Math.min(startIndex + itemsPerPage, filteredRooms.length)} of{" "}
-            {filteredRooms.length} rooms
-          </p>
-          <div className="flex items-center space-x-2">
-            <Building className="w-4 h-4 text-gray-400" aria-hidden="true" />
-            <span className="text-sm text-gray-600">Total: {rooms.length} rooms</span>
-          </div>
-        </div>
-
-        {/* Rooms Table */}
-        <Card className="shadow-lg">
-          <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-24">Room #</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="w-20">Floor</TableHead>
-                    <TableHead>View</TableHead>
-                    <TableHead className="w-24">Price</TableHead>
-                    <TableHead>Amenities</TableHead>
-                    <TableHead className="w-32">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {paginatedRooms.map((room) => (
-                    <TableRow key={room.id} className="hover:bg-gray-50 transition-colors">
-                      <TableCell className="font-medium">{room.roomNumber}</TableCell>
-                      <TableCell>{room.type}</TableCell>
-                      <TableCell>
-                        <Badge className={getStatusBadge(room.status)}>
-                          {room.status.charAt(0).toUpperCase() + room.status.slice(1)}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>{room.floor}</TableCell>
-                      <TableCell className="flex items-center">
-                        <Eye className="w-3 h-3 mr-1 text-gray-400" aria-hidden="true" />
-                        {room.view}
-                      </TableCell>
-                      <TableCell className="flex items-center">
-                        <DollarSign className="w-3 h-3 mr-1 text-gray-400" aria-hidden="true" />
-                        {room.price}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-1">
-                          {room.amenities.slice(0, 2).map((amenity) => (
-                            <Badge key={amenity} variant="outline" className="text-xs">
-                              {amenity}
-                            </Badge>
-                          ))}
-                          {room.amenities.length > 2 && (
-                            <Badge variant="outline" className="text-xs">
-                              +{room.amenities.length - 2}
-                            </Badge>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Button
-                          onClick={() => setSelectedRoom(room)}
-                          size="sm"
-                          className="bg-secondary hover:bg-secondary/90 text-white transition-all duration-200 transform hover:scale-105 active:scale-95"
-                          aria-label={`Update status for room ${room.roomNumber}`}
-                        >
-                          <Settings className="w-3 h-3 mr-1" aria-hidden="true" />
-                          Update
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-
-            {filteredRooms.length === 0 && (
-              <div className="text-center py-12">
-                <Bed className="w-12 h-12 mx-auto mb-4 text-gray-300" aria-hidden="true" />
-                <h3 className="text-lg font-medium text-gray-700 mb-2">No rooms found</h3>
-                <p className="text-gray-500">Try adjusting your search or filters</p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Pagination */}
-        {totalPages > 1 && (
-          <div className="mt-6 flex items-center justify-between">
-            <div className="flex items-center space-x-2">
-              <Button
-                onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-                disabled={currentPage === 1}
-                variant="outline"
-                size="sm"
-                className="border-gray-300"
-                aria-label="Previous page"
-              >
-                <ChevronLeft className="w-4 h-4" aria-hidden="true" />
-                Previous
-              </Button>
-
-              <div className="flex items-center space-x-1">
-                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                  const page = i + 1
-                  return (
-                    <Button
-                      key={page}
-                      onClick={() => setCurrentPage(page)}
-                      variant={currentPage === page ? "default" : "outline"}
-                      size="sm"
-                      className={
-                        currentPage === page
-                          ? "bg-primary text-white"
-                          : "border-gray-300 text-gray-700 hover:bg-gray-50"
-                      }
-                      aria-label={`Go to page ${page}`}
-                    >
-                      {page}
-                    </Button>
-                  )
-                })}
-              </div>
-
-              <Button
-                onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
-                disabled={currentPage === totalPages}
-                variant="outline"
-                size="sm"
-                className="border-gray-300"
-                aria-label="Next page"
-              >
-                Next
-                <ChevronRight className="w-4 h-4" aria-hidden="true" />
-              </Button>
-            </div>
-
-            <p className="text-sm text-gray-600">
-              Page {currentPage} of {totalPages}
-            </p>
+                  <Link href={`/rooms/${room.roomNumber}`} passHref>
+                    <Button className="w-full mt-4">View Details</Button>
+                  </Link>
+                  {isAdmin && (
+                    <div className="flex justify-end gap-2 mt-2">
+                      <Button variant="outline" size="sm" onClick={() => handleEditClick(room)}>
+                        Edit
+                      </Button>
+                      <Button variant="destructive" size="sm" onClick={() => handleDeleteClick(room)}>
+                        Delete
+                      </Button>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
           </div>
         )}
-      </div>
 
-      {/* Add Room Dialog */}
-      <Dialog open={showAddForm} onOpenChange={setShowAddForm}>
-        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="text-2xl font-medium text-primary">Add New Room</DialogTitle>
-            <DialogDescription>Create a new room in the hotel inventory</DialogDescription>
-          </DialogHeader>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 py-4">
-            <div className="space-y-2">
-              <Label htmlFor="room-number">Room Number *</Label>
-              <Input
-                id="room-number"
-                value={newRoom.roomNumber}
-                onChange={(e) => setNewRoom((prev) => ({ ...prev, roomNumber: e.target.value }))}
-                placeholder="e.g., 101"
-                className="h-12"
-                aria-label="Room number"
-                required
-              />
+        <div className="flex items-center justify-between px-4 py-3 border-t bg-background">
+              <Button
+                variant="outline"
+                size="sm"
+            onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+            disabled={currentPage === 1}
+              >
+            <ChevronLeft className="h-4 w-4 mr-2" /> Previous
+              </Button>
+          <span className="text-sm text-muted-foreground">
+            Page {currentPage} of {totalPages}
+          </span>
+              <Button
+                variant="outline"
+                size="sm"
+            onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+            disabled={currentPage === totalPages}
+              >
+            Next <ChevronRight className="h-4 w-4 ml-2" />
+              </Button>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="room-type">Room Type *</Label>
-              <Select value={newRoom.type} onValueChange={(value) => setNewRoom((prev) => ({ ...prev, type: value }))}>
-                <SelectTrigger id="room-type" className="h-12">
-                  <SelectValue placeholder="Select room type" />
+      <Dialog open={showAddForm} onOpenChange={setShowAddForm}>
+          <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+              <DialogTitle>Add New Room</DialogTitle>
+              <DialogDescription>Fill in the details for the new room.</DialogDescription>
+          </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="roomNumber" className="text-right">Room Number</Label>
+                <Input id="roomNumber" value={newRoom.roomNumber} onChange={(e) => setNewRoom({ ...newRoom, roomNumber: e.target.value })} className="col-span-3" />
+            </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="type" className="text-right">Type</Label>
+                <Select value={newRoom.type} onValueChange={(value) => setNewRoom({ ...newRoom, type: value })}>
+                  <SelectTrigger className="col-span-3">
+                    <SelectValue placeholder="Select Type" />
                 </SelectTrigger>
                 <SelectContent>
                   {ROOM_TYPES.map((type) => (
@@ -668,28 +511,15 @@ export default function RoomManagementPage() {
                 </SelectContent>
               </Select>
             </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="floor">Floor *</Label>
-              <Input
-                id="floor"
-                type="number"
-                min="1"
-                max="10"
-                value={newRoom.floor}
-                onChange={(e) => setNewRoom((prev) => ({ ...prev, floor: e.target.value }))}
-                placeholder="e.g., 1"
-                className="h-12"
-                aria-label="Floor number"
-                required
-              />
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="floor" className="text-right">Floor</Label>
+                <Input id="floor" type="number" value={newRoom.floor} onChange={(e) => setNewRoom({ ...newRoom, floor: e.target.value })} className="col-span-3" />
             </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="view">View *</Label>
-              <Select value={newRoom.view} onValueChange={(value) => setNewRoom((prev) => ({ ...prev, view: value }))}>
-                <SelectTrigger id="view" className="h-12">
-                  <SelectValue placeholder="Select view type" />
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="view" className="text-right">View</Label>
+                <Select value={newRoom.view} onValueChange={(value) => setNewRoom({ ...newRoom, view: value })}>
+                  <SelectTrigger className="col-span-3">
+                    <SelectValue placeholder="Select View" />
                 </SelectTrigger>
                 <SelectContent>
                   {VIEWS.map((view) => (
@@ -700,103 +530,161 @@ export default function RoomManagementPage() {
                 </SelectContent>
               </Select>
             </div>
-
-            <div className="space-y-2 md:col-span-2">
-              <Label htmlFor="price">Price per Night *</Label>
-              <div className="relative">
-                <DollarSign className="absolute left-3 top-3 h-4 w-4 text-gray-400" aria-hidden="true" />
-                <Input
-                  id="price"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={newRoom.price}
-                  onChange={(e) => setNewRoom((prev) => ({ ...prev, price: e.target.value }))}
-                  placeholder="0.00"
-                  className="pl-10 h-12"
-                  aria-label="Price per night"
-                  required
-                />
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="price" className="text-right">Price</Label>
+                <Input id="price" type="number" value={newRoom.price} onChange={(e) => setNewRoom({ ...newRoom, price: e.target.value })} className="col-span-3" />
               </div>
-            </div>
-
-            <div className="space-y-3 md:col-span-2">
-              <Label>Amenities</Label>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              <div className="grid grid-cols-4 items-start gap-4">
+                <Label className="text-right mt-2">Amenities</Label>
+                <div className="col-span-3 grid grid-cols-2 gap-2">
                 {AMENITIES.map((amenity) => (
                   <div key={amenity} className="flex items-center space-x-2">
                     <Checkbox
                       id={`amenity-${amenity}`}
                       checked={newRoom.amenities.includes(amenity)}
-                      onCheckedChange={() => handleAmenityToggle(amenity)}
-                      aria-label={`Include ${amenity} amenity`}
-                    />
-                    <Label htmlFor={`amenity-${amenity}`} className="text-sm cursor-pointer">
-                      {amenity}
-                    </Label>
+                        onCheckedChange={(checked) => {
+                          setNewRoom((prev) => ({
+                            ...prev,
+                            amenities: checked
+                              ? [...prev.amenities, amenity]
+                              : prev.amenities.filter((a) => a !== amenity),
+                          }))
+                        }}
+                      />
+                      <Label htmlFor={`amenity-${amenity}`}>{amenity}</Label>
                   </div>
                 ))}
               </div>
             </div>
           </div>
-
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAddForm(false)} className="border-gray-300 text-gray-700">
-              Cancel
-            </Button>
-            <Button
-              onClick={handleAddRoom}
-              disabled={isLoading}
-              className="bg-primary hover:bg-primary/90 text-white"
-              aria-label="Save new room"
-            >
-              {isLoading ? "Saving..." : "Save Room"}
+              <Button onClick={handleAddRoom} disabled={isLoading}>
+                {isLoading ? "Adding..." : "Add Room"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Update Status Dialog */}
-      <Dialog open={!!selectedRoom} onOpenChange={() => setSelectedRoom(null)}>
-        <DialogContent className="sm:max-w-md">
+        <Dialog open={selectedRoom !== null} onOpenChange={() => setSelectedRoom(null)}>
+          <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
-            <DialogTitle className="text-xl font-medium text-primary">
-              Update Room {selectedRoom?.roomNumber} Status
-            </DialogTitle>
-            <DialogDescription>Change the current status of this room</DialogDescription>
+              <DialogTitle>Update Room Status</DialogTitle>
+              <DialogDescription>Update the status of Room {selectedRoom?.roomNumber}.</DialogDescription>
           </DialogHeader>
-
-          <div className="py-4">
-            <div className="space-y-3">
+            <div className="grid gap-4 py-4">
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="status" className="text-right">Status</Label>
+                <Select value={selectedRoom?.status} onValueChange={(value) => selectedRoom && handleStatusUpdate(selectedRoom, value)}>
+                  <SelectTrigger className="col-span-3">
+                    <SelectValue placeholder="Select Status" />
+                  </SelectTrigger>
+                  <SelectContent>
               {ROOM_STATUSES.map((status) => (
-                <Button
-                  key={status}
-                  onClick={() => selectedRoom && handleStatusUpdate(selectedRoom, status)}
-                  disabled={isLoading || selectedRoom?.status === status}
-                  variant={selectedRoom?.status === status ? "default" : "outline"}
-                  className={`w-full justify-start h-12 ${
-                    selectedRoom?.status === status
-                      ? "bg-primary text-white"
-                      : "border-gray-300 text-gray-700 hover:bg-gray-50"
-                  }`}
-                  aria-label={`Set status to ${status}`}
-                >
-                  <Badge className={`${getStatusBadge(status)} mr-3`}>
-                    {status.charAt(0).toUpperCase() + status.slice(1)}
-                  </Badge>
-                  {status.charAt(0).toUpperCase() + status.slice(1)}
-                </Button>
-              ))}
+                      <SelectItem key={status} value={status}>
+                        {status}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          <DialogFooter>
+              <Button onClick={() => selectedRoom && handleStatusUpdate(selectedRoom, selectedRoom.status)} disabled={isLoading}>
+                {isLoading ? "Updating..." : "Update Status"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showEditForm} onOpenChange={setShowEditForm}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Edit Room</DialogTitle>
+            <DialogDescription>Update the details of the room.</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="roomNumber" className="text-right">Room Number</Label>
+              <Input id="roomNumber" value={editingRoom?.roomNumber} onChange={(e) => handleEditChange("roomNumber", e.target.value)} className="col-span-3" />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="type" className="text-right">Type</Label>
+              <Select value={editingRoom?.type} onValueChange={(value) => handleEditChange("type", value)}>
+                <SelectTrigger className="col-span-3">
+                  <SelectValue placeholder="Select Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {ROOM_TYPES.map((type) => (
+                    <SelectItem key={type} value={type}>
+                      {type}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="floor" className="text-right">Floor</Label>
+              <Input id="floor" type="number" value={editingRoom?.floor} onChange={(e) => handleEditChange("floor", Number.parseInt(e.target.value))} className="col-span-3" />
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="view" className="text-right">View</Label>
+              <Select value={editingRoom?.view} onValueChange={(value) => handleEditChange("view", value)}>
+                <SelectTrigger className="col-span-3">
+                  <SelectValue placeholder="Select View" />
+                </SelectTrigger>
+                <SelectContent>
+                  {VIEWS.map((view) => (
+                    <SelectItem key={view} value={view}>
+                      {view}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-4 items-center gap-4">
+              <Label htmlFor="price" className="text-right">Price</Label>
+              <Input id="price" type="number" value={editingRoom?.price} onChange={(e) => handleEditChange("price", Number.parseFloat(e.target.value))} className="col-span-3" />
+            </div>
+            <div className="grid grid-cols-4 items-start gap-4">
+              <Label className="text-right mt-2">Amenities</Label>
+              <div className="col-span-3 grid grid-cols-2 gap-2">
+                {AMENITIES.map((amenity) => (
+                  <div key={amenity} className="flex items-center space-x-2">
+                    <Checkbox
+                      id={`amenity-${amenity}`}
+                      checked={editingRoom?.amenities.includes(amenity)}
+                      onCheckedChange={(checked) => {
+                        handleEditChange("amenities", checked ? [...editingRoom?.amenities || [], amenity] : editingRoom?.amenities.filter((a) => a !== amenity) || [])
+                      }}
+                    />
+                    <Label htmlFor={`amenity-${amenity}`}>{amenity}</Label>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
-
           <DialogFooter>
-            <Button variant="outline" onClick={() => setSelectedRoom(null)} className="border-gray-300 text-gray-700">
-              Cancel
+            <Button onClick={handleUpdateRoom} disabled={isLoading}>
+              {isLoading ? "Updating..." : "Update Room"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <DialogContent className="sm:max-w-[425px]">
+          <DialogHeader>
+            <DialogTitle>Confirm Delete</DialogTitle>
+            <DialogDescription>Are you sure you want to delete this room?</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button onClick={handleConfirmDelete} disabled={isLoading}>
+              {isLoading ? "Deleting..." : "Delete"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
-  )
+    </div>
+  );
 }

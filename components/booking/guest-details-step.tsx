@@ -54,9 +54,9 @@ export default function GuestDetailsStep({ data, onUpdate, onNext, onPrev, setEr
       setError("Phone number is required")
       return false
     }
-    if (!/^[\+]?[0-9\s\-$$$$]{10,}$/.test(formData.phone)) {
-      setError("Please enter a valid phone number")
-      return false
+    if (!/^6[578]\d{7}$/.test(formData.phone)) {
+      setError("Please enter a valid 9-digit number starting with 65, 67, or 68.");
+      return false;
     }
     if (!captchaVerified) {
       setError("Please complete the CAPTCHA verification")
@@ -72,6 +72,27 @@ export default function GuestDetailsStep({ data, onUpdate, onNext, onPrev, setEr
     setError("")
 
     try {
+      // Log the data being sent to the backend
+      const guestData = {
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        email: formData.email,
+        phone: formData.phone,
+        guestCount: formData.guestCount,
+        specialRequests: formData.specialRequests,
+        roomId: data.selectedRoom?._id,
+        checkIn: data.checkIn,
+        checkOut: data.checkOut,
+        roomType: data.selectedRoom?.type,
+        roomNumber: data.selectedRoom?.roomNumber,
+        price: data.selectedRoom?.price
+      }
+
+      console.log('Sending guest details to backend:', {
+        endpoint: 'http://localhost:5000/api/bookings/create',
+        data: guestData
+      })
+
       // Simulate API call to /api/bookings/create
       await new Promise(resolve => setTimeout(resolve, 1500))
 
@@ -88,6 +109,7 @@ export default function GuestDetailsStep({ data, onUpdate, onNext, onPrev, setEr
 
       onNext()
     } catch (error) {
+      console.error('Error saving guest details:', error)
       setError("Failed to save guest details. Please try again.")
     } finally {
       setIsLoading(false)
@@ -95,6 +117,8 @@ export default function GuestDetailsStep({ data, onUpdate, onNext, onPrev, setEr
   }
 
   const handleSignIn = () => {
+    // Log the redirect to login
+    console.log('Redirecting to login page')
     // Redirect to sign in page
     setError("Sign in functionality would redirect to login page")
   }
@@ -105,7 +129,7 @@ export default function GuestDetailsStep({ data, onUpdate, onNext, onPrev, setEr
   }
 
   return (
-    <div className="space-y-6">
+    <div className=" space-y-6">
       {/* Booking Summary */}
       <Card className="bg-accent/50 border-accent">
         <CardContent className="p-4">

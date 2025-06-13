@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -10,33 +10,21 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Calendar, Users, Wifi, Waves, MapPin, Phone, Mail, Shield, LogIn } from "lucide-react"
 import Image from "next/image"
 import Link from "next/link"
+import { fetchRooms } from "@/services/rooms"
+import { Badge } from "@/components/ui/badge"
+import Navbar from "@/components/Navbar"
 
-const featuredRooms = [
-  {
-    id: 1,
-    number: "101",
-    type: "Ocean View Suite",
-    price: 299,
-    image: "/placeholder.svg?height=200&width=300",
-    amenities: ["Ocean View", "King Bed", "Balcony", "Mini Bar"],
-  },
-  {
-    id: 2,
-    number: "205",
-    type: "Deluxe Room",
-    price: 199,
-    image: "/placeholder.svg?height=200&width=300",
-    amenities: ["Garden View", "Queen Bed", "Work Desk", "Coffee Maker"],
-  },
-  {
-    id: 3,
-    number: "301",
-    type: "Presidential Suite",
-    price: 599,
-    image: "/placeholder.svg?height=200&width=300",
-    amenities: ["Panoramic View", "2 Bedrooms", "Living Room", "Jacuzzi"],
-  },
-]
+interface Room {
+  _id: string
+  roomNumber: string
+  type: string
+  status: "available" | "occupied" | "maintenance" | "cleaning"
+  floor: number
+  view: string
+  price: number
+  amenities: string[]
+  imageLink?: string
+}
 
 const amenities = [
   {
@@ -52,46 +40,90 @@ const amenities = [
 ]
 
 export default function HomePage() {
+  const [roomType, setRoomType] = useState("any")
   const [checkIn, setCheckIn] = useState("")
   const [checkOut, setCheckOut] = useState("")
-  const [guests, setGuests] = useState("")
-  const [roomType, setRoomType] = useState("")
   const [searchError, setSearchError] = useState("")
   const [isSearching, setIsSearching] = useState(false)
+  const [rooms, setRooms] = useState<Room[]>([])
+  const [filteredRooms, setFilteredRooms] = useState<Room[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [showAllRooms, setShowAllRooms] = useState(false)
+
+  useEffect(() => {
+    const loadRooms = async () => {
+      try {
+        const data = await fetchRooms()
+        console.log('Fetched Rooms:', data)
+        setRooms(data)
+        setFilteredRooms(data)
+      } catch (err) {
+        console.error('Error fetching rooms:', err)
+        setError(err instanceof Error ? err.message : 'An unknown error occurred')
+      } finally {
+        setIsLoading(false)
+      }
+    }
+
+    loadRooms()
+  }, [])
+
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case "available":
+        return <Badge className="bg-green-500 text-white hover:bg-green-600">Available</Badge>
+      case "occupied":
+        return <Badge className="bg-red-500 text-white hover:bg-red-600">Occupied</Badge>
+      case "maintenance":
+        return <Badge className="bg-orange-500 text-white hover:bg-orange-600">Maintenance</Badge>
+      case "cleaning":
+        return <Badge className="bg-yellow-500 text-white hover:bg-yellow-600">Cleaning</Badge>
+      default:
+        return <Badge>Unknown</Badge>
+    }
+  }
 
   const handleSearch = async () => {
     setSearchError("")
     setIsSearching(true)
 
-    // Basic validation
-    if (!checkIn || !checkOut || !guests) {
-      setSearchError("Please fill in all required fields")
-      setIsSearching(false)
-      return
-    }
-
     try {
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 1000))
+      // Log search parameters
+      console.log('Search Parameters:', {
+        checkIn,
+        checkOut,
+        roomType,
+        endpoint: 'http://localhost:5000/api/rooms/search'
+      })
 
-      // Simulate 409 error for demonstration
-      if (Math.random() > 0.7) {
-        setSearchError("No rooms available for selected dates")
-        setIsSearching(false)
-        return
+      // Filter rooms based on room type
+      const filtered = rooms.filter(room => 
+        roomType === "any" ? true : room.type.toLowerCase() === roomType.toLowerCase()
+      )
+      setFilteredRooms(filtered)
+      
+      if (filtered.length === 0) {
+        setSearchError("No rooms available for selected type")
       }
 
-      // Success - would redirect to search results
-      console.log("Search successful", { checkIn, checkOut, guests, roomType })
+      // Log filtered results
+      console.log('Filtered Rooms:', filtered)
     } catch (error) {
+      console.error('Search Error:', error)
       setSearchError("An error occurred while searching. Please try again.")
     } finally {
       setIsSearching(false)
     }
   }
 
+  // Get unique room types from the rooms data
+  const roomTypes = Array.from(new Set(rooms.map(room => room.type)))
+
   return (
     <div className="min-h-screen bg-neutral font-roboto">
+      <Navbar />
+      <div className="pt-16">
       {/* Hero Section */}
       <section className="relative h-screen flex items-center justify-center">
         <div className="absolute inset-0 z-0">
@@ -117,7 +149,7 @@ export default function HomePage() {
               <CardTitle className="text-2xl font-medium text-primary text-center">Find Your Perfect Room</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                 <div className="space-y-2">
                   <Label htmlFor="check-in" className="text-sm font-normal text-gray-700">
                     Check-in Date *
@@ -128,7 +160,10 @@ export default function HomePage() {
                       id="check-in"
                       type="date"
                       value={checkIn}
-                      onChange={(e) => setCheckIn(e.target.value)}
+                      onChange={(e) => {
+                        setCheckIn(e.target.value)
+                        console.log('Check-in Date Set:', e.target.value)
+                      }}
                       className="pl-10 border-gray-300 focus:border-primary focus:ring-primary"
                       aria-label="Select check-in date"
                       required
@@ -146,7 +181,10 @@ export default function HomePage() {
                       id="check-out"
                       type="date"
                       value={checkOut}
-                      onChange={(e) => setCheckOut(e.target.value)}
+                      onChange={(e) => {
+                        setCheckOut(e.target.value)
+                        console.log('Check-out Date Set:', e.target.value)
+                      }}
                       className="pl-10 border-gray-300 focus:border-primary focus:ring-primary"
                       aria-label="Select check-out date"
                       required
@@ -155,29 +193,8 @@ export default function HomePage() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="guests" className="text-sm font-normal text-gray-700">
-                    Number of Guests *
-                  </Label>
-                  <div className="relative">
-                    <Users className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                    <Input
-                      id="guests"
-                      type="number"
-                      min="1"
-                      max="8"
-                      value={guests}
-                      onChange={(e) => setGuests(e.target.value)}
-                      className="pl-10 border-gray-300 focus:border-primary focus:ring-primary"
-                      placeholder="1"
-                      aria-label="Number of guests"
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-2">
                   <Label htmlFor="room-type" className="text-sm font-normal text-gray-700">
-                    Room Type (Optional)
+                    Room Type
                   </Label>
                   <Select value={roomType} onValueChange={setRoomType}>
                     <SelectTrigger
@@ -188,10 +205,12 @@ export default function HomePage() {
                       <SelectValue placeholder="Any" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="standard">Standard Room</SelectItem>
-                      <SelectItem value="deluxe">Deluxe Room</SelectItem>
-                      <SelectItem value="suite">Suite</SelectItem>
-                      <SelectItem value="presidential">Presidential Suite</SelectItem>
+                      <SelectItem value="any">Any</SelectItem>
+                      {roomTypes.map((type) => (
+                        <SelectItem key={type} value={type}>
+                          {type}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
@@ -239,13 +258,19 @@ export default function HomePage() {
             </p>
           </div>
 
+            {isLoading ? (
+              <div className="text-center py-10">Loading rooms...</div>
+            ) : error ? (
+              <div className="text-center py-10 text-red-500">Error: {error}</div>
+            ) : (
+              <>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {featuredRooms.map((room) => (
-              <Card key={room.id} className="overflow-hidden shadow-lg hover:shadow-xl transition-shadow duration-300">
+                  {filteredRooms.slice(0, showAllRooms ? filteredRooms.length : 6).map((room) => (
+                    <Card key={room._id} className="overflow-hidden shadow-lg hover:shadow-xl transition-shadow duration-300">
                 <div className="relative h-48">
                   <Image
-                    src={room.image || "/placeholder.svg"}
-                    alt={`${room.type} - Room ${room.number}`}
+                          src={room.imageLink || "/placeholder.svg?height=200&width=300"}
+                          alt={`${room.type} - Room ${room.roomNumber}`}
                     fill
                     className="object-cover"
                   />
@@ -253,11 +278,11 @@ export default function HomePage() {
                 <CardHeader>
                   <div className="flex justify-between items-start">
                     <div>
-                      <CardTitle className="text-xl font-medium text-primary">Room {room.number}</CardTitle>
+                            <CardTitle className="text-xl font-medium text-primary">Room {room.roomNumber}</CardTitle>
                       <CardDescription className="text-lg font-normal text-gray-600">{room.type}</CardDescription>
                     </div>
                     <div className="text-right">
-                      <p className="text-2xl font-medium text-primary">${room.price}</p>
+                            <p className="text-2xl font-medium text-primary">{room.price.toLocaleString()} FCFA</p>
                       <p className="text-sm font-normal text-gray-500">per night</p>
                     </div>
                   </div>
@@ -266,7 +291,7 @@ export default function HomePage() {
                   <div className="space-y-2">
                     <h4 className="font-medium text-gray-700">Amenities:</h4>
                     <ul className="grid grid-cols-2 gap-1 text-sm font-normal text-gray-600">
-                      {room.amenities.map((amenity, index) => (
+                      {room.amenities.slice(0, 4).map((amenity, index) => (
                         <li key={index} className="flex items-center">
                           <span className="w-1.5 h-1.5 bg-secondary rounded-full mr-2" />
                           {amenity}
@@ -276,16 +301,32 @@ export default function HomePage() {
                   </div>
                 </CardContent>
                 <CardFooter>
-                  <Button
-                    className="w-full bg-primary hover:bg-primary/90 text-white transition-all duration-200 transform hover:scale-105 active:scale-95"
-                    aria-label={`View details for ${room.type} room ${room.number}`}
-                  >
-                    View Details
-                  </Button>
+                  <Link href={`/booking?step=2&roomType=${room.type}&checkIn=${checkIn}&checkOut=${checkOut}`}>
+                    <Button
+                      className="w-full bg-primary hover:bg-primary/90 text-white transition-all duration-200 transform hover:scale-105 active:scale-95"
+                      aria-label={`View available ${room.type} rooms`}
+                    >
+                      View Available Rooms
+                    </Button>
+                  </Link>
                 </CardFooter>
               </Card>
             ))}
           </div>
+                {filteredRooms.length > 6 && (
+                  <div className="text-center mt-8">
+                    <Button
+                      variant="outline"
+                      size="lg"
+                      onClick={() => setShowAllRooms(!showAllRooms)}
+                      className="hover:bg-primary hover:text-white transition-colors"
+                    >
+                      {showAllRooms ? "Show Less" : "See More Rooms"}
+                    </Button>
+                  </div>
+                )}
+              </>
+            )}
         </div>
       </section>
 
@@ -333,7 +374,7 @@ export default function HomePage() {
               <div className="space-y-3">
                 <div className="flex items-center space-x-3">
                   <MapPin className="w-5 h-5 text-secondary" aria-hidden="true" />
-                  <span className="font-normal text-white/80">123 Ocean Drive, Coastal City</span>
+                    <span className="font-normal text-white/80">000001 Buea, South West Cameroon </span>
                 </div>
                 <div className="flex items-center space-x-3">
                   <Phone className="w-5 h-5 text-secondary" aria-hidden="true" />
@@ -342,7 +383,7 @@ export default function HomePage() {
                     className="font-normal text-white/80 hover:text-white transition-colors"
                     aria-label="Call hotel phone number"
                   >
-                    +1 (234) 567-8900
+                      +237 677 88 99 66
                   </a>
                 </div>
                 <div className="flex items-center space-x-3">
@@ -392,6 +433,7 @@ export default function HomePage() {
           </div>
         </div>
       </footer>
+      </div>
     </div>
   )
 }
